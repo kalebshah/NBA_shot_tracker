@@ -1,0 +1,2 @@
+"id","nba_id","display_name","first_name","last_name","roster_status","from_year","to_year","player_code","team_id","team_city","team_name","team_abbreviation","team_code","games_played_flag","created_at","updated_at"
+2113,2544,"LeBron James","LeBron","James",1,2003,2023,"lebron_james",1610612739,"Cleveland","Cavaliers","CLE","cavaliers","Y",2023-10-29 16:04:33.321599,2023-10-29 16:04:33.321599

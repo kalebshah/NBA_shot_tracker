@@ -1,0 +1,2 @@
+"id","nba_id","display_name","first_name","last_name","roster_status","from_year","to_year","player_code","team_id","team_city","team_name","team_abbreviation","team_code","games_played_flag","created_at","updated_at"
+631,202710,"Jimmy Butler","Jimmy","Butler",1,2011,2023,"jimmy_butler",1610612750,"Minnesota","Timberwolves","MIN","timberwolves","Y",2023-10-29 16:04:28.272642,2023-10-29 16:04:28.272642

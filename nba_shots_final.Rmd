@@ -1,0 +1,429 @@
+---
+title: "NBA Shots Tracker"
+output: html_document
+author: Hannah Kim, Kaleb Shah
+date: "2023-11-04"
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# install.packages("shiny")
+# install.packages("RPostgreSQL")
+# install.packages("DBI"
+# install.packages("RPostgres")
+# install.packages(png)
+# install.packages("viridis")
+# install.packages("shinythemes")
+```
+
+
+```{r}
+# Load the necessary libraries
+library(shiny)
+library(RPostgreSQL)
+library(ggplot2)
+library(hexbin)
+library(httr)
+library(jsonlite)
+library(DBI)
+library(RPostgres)
+library(png)
+library(grid)
+library(png)
+library(dplyr)
+library(tidyverse)
+library(prismatic)
+library(extrafont)
+library(cowplot)
+library(tableHTML)
+library(plotly)
+library(readr)
+library(shinythemes)
+```
+
+
+```{r}
+all_players <- c(
+  'Lebron James', 'Chris Paul', 'Brook Lopez', 'Kevin Love', 'Russell Westbrook',
+  'Kevin Durant', 'Stephen Curry', 'DeMar DeRozan', 'James Harden', 'True Holiday',
+  'Derrick Rose', 'Paul George', 'Jimmy Butler', 'Kyrie Irving', 'Blake Griffin'
+)
+
+all_seasons <- c("All Seasons", "2018-19", "2013-14", "2010-11", "2006-07", "2008-09", "2017-18", "2021-22", "2005-06", "2007-08", "2012-13", "1997-98", "1996-97", "2001-02", "2002-03", "2014-15", "2016-17", "1999-00", "2009-10", "2004-05", "2022-23", "2011-12", "2000-01", "2020-21", "2015-16", "2019-20", "2023-24", "2003-04", "1998-99")
+
+all_zones <- c("Above the Break 3", "Mid-Range", "In The Paint (Non-RA)", "Restricted Area", "Backcourt", "Right Corner 3", "Left Corner 3", "All Zones")
+```
+
+```{r}
+# Helper functions to load player and shot data from CSV
+get_player_data <- function(player_name) {
+  file_name <- paste0(gsub(" ", "_", player_name), "_player.csv")
+  read_csv(file_name)
+}
+
+get_shots_data <- function(player_name) {
+  file_name <- paste0(gsub(" ", "_", player_name), "_shots.csv")
+  read_csv(file_name)
+}
+```
+
+# The UI
+```{r}
+# Set up the user interface of the Shiny application with custom styling and layout
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+ui <- fluidPage(
+  # Custom CSS for table styling and main panel layout
+  tags$head(
+    tags$style(HTML("
+      /* Add styles for zebra striped table */
+      #statsTable table {
+        width: 60%;
+        margin: 0 auto;
+        border-collapse: collapse;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        background-color: #fff;
+      }
+      #statsTable th {
+        border: 1px solid #ddd !important;
+        padding: 10px;
+        text-align: center;
+        font-size: 0.9em !importan;
+        background-color: #666 !important; /* Header background color */
+        color: #fffff !important; /* Header text color */
+        font-weight: bold;
+      }
+      #statsTable td {
+        border: 1px solid #ddd;
+        padding: 10px;
+        text-align: center;
+        font-size: 0.9em;
+      }
+      #statsTable tr:nth-child(odd) {
+        background-color: #f9f9f9; /* Light shade for odd rows */
+      }
+      #statsTable tr:nth-child(even) {
+        background-color: #e9e9e9; /* Darker shade for even rows */
+      }
+      #statsTable table {
+        width: 60%; /* Adjust the width as needed */
+        margin: 0 auto; /* Centers the table */
+        border-collapse: collapse;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.3); /* Adds shadow for depth */
+        background-color: #fff; /* Background color for the table */
+      }
+      #statsTable_wrapper { /* Assuming your table has an id of 'statsTable' */
+        overflow-x: auto; /* Adds horizontal scroll if table is too wide */
+      }
+      .main-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center; /* Centers the contents of main panel */
+      }
+    "))
+  ),
+  # Title panel for the application
+titlePanel("Basketball Shot Chart"),
+# Layout of sidebar and main panel
+  sidebarLayout(
+    sidebarPanel(
+      # Dynamic UI elements to select player, season, etc.
+      uiOutput("player_selector"),
+      uiOutput("season_selector"),
+      selectInput("chartType", "Choose Chart Type:", choices = c("Heat Map", "Scatter", "Hexagonal")),
+      uiOutput("zone_selector"),
+      sliderInput("shotDistance", "Select Shot Distance:", min = 0, max = 94, value = c(0, 94)),
+      selectInput("shotOutcome", "Select Shot Outcome:", choices = c("All Shots", "Made Shots", "Missed Shots")),
+      selectInput("gameType", "Select Season Type:", 
+            choices = c("All Games", "Regular Season", "Playoffs"))
+    ),
+    mainPanel(
+      tabsetPanel(
+        # Panels for shot chart and shot distribution plots
+        tabPanel("Shot Chart", plotOutput("shotChart")),
+        tabPanel("Shot Distribution",
+                 plotlyOutput("shotDistributionPlot"))  # New tab for the shot distribution plot
+      ),
+      # Positioning of the statistics table
+      div(style = "margin-top: 400px;margin-right: 400px;margin-bottom: 100px", tableOutput("statsTable"))
+    )
+  )
+)
+
+```
+
+
+```{r}
+server <- function(input, output, session) {
+
+  # Reactive data objects
+  player_data <- reactive({
+    req(input$playerName)  # Require that the input is available
+    get_player_data(input$playerName)
+  })
+  
+  shots_data <- reactive({
+    req(input$playerName)  # Require that the input is available
+    get_shots_data(input$playerName)
+  })
+
+  # Default selections
+  observe({
+    updateSelectizeInput(session, "playerName", selected = "Stephen Curry")
+    updateSelectInput(session, "season", selected = "2016-17")
+  })
+  
+  
+  # Populate the player names, seasons, and shot zones for the dropdowns
+  output$player_selector <- renderUI({
+    selectizeInput("playerName", "Choose a Player:", choices = all_players, selected = "Stephen Curry")
+  })
+  
+  output$season_selector <- renderUI({
+    selectInput("season", "Choose Season:", choices = all_seasons, selected = "2016-17")
+  })
+  
+  output$zone_selector <- renderUI({
+    selectInput("shotZone", "Select Shot Zone:", choices = all_zones, selected = "All Zones")
+  })
+  
+  # Image and plotting logic for the basketball court shot chart
+  courtImg.Path <- "nba_court_tr.png"  # Note that the file is in the same directory
+  court_img <- readPNG(courtImg.Path, native = TRUE)
+  court <- rasterGrob(court_img, width = unit(1, "npc"), height = unit(1, "npc"))
+  
+
+  # Reactive expression for filtered shots data
+  filtered_shots_data <- reactive({
+    req(shots_data())  # Require that shots_data is available
+    # Filter for the selected season
+    if(input$season != "All Seasons") {
+      shots_season <- shots_data() %>% filter(season == input$season)
+    } else {
+      shots_season <- shots_data()
+    }
+  
+    # Filter for the selected shot zone
+    if(input$shotZone != "All Zones") {
+      shots_season <- shots_season %>% filter(shot_zone_basic == input$shotZone)
+    }
+    
+    # Filter for the selected season type
+    if(input$gameType == "Regular Season") {
+    shots_season <- shots_season %>% filter(season_type == "Regular Season")
+    } else if(input$gameType == "Playoffs") {
+    shots_season <- shots_season %>% filter(season_type == "Playoffs")
+    }
+  
+    # Filter for the selected shot distance
+    shots_season <- shots_season %>% filter(shot_distance >= input$shotDistance[1], shot_distance <= input$shotDistance[2])
+  
+    # Filter for the selected shot outcome
+    if(input$shotOutcome != "All Shots") {
+      outcome_flag <- ifelse(input$shotOutcome == "Made Shots", TRUE, FALSE)
+      shots_season <- shots_season %>% filter(shot_made_flag == outcome_flag,)
+    }
+  
+    shots_season
+  })
+  
+  # Plot rendering based on user input for shot chart
+  output$shotChart <- renderPlot({
+    shots_season <- filtered_shots_data()
+    req(nrow(shots_season) > 0)  # Make sure we have data to plot
+  
+    plot_base <- ggplot() +
+      xlim(-250, 250) +
+      ylim(-47.5, 422.5) +
+      coord_fixed() +
+      labs(title = paste(input$playerName, "Shot Chart", input$season)) +
+      theme_void() +
+      theme(plot.title = element_text(size = 22, face = "bold", hjust = 0.5))
+  
+    # Generate Scatter plot
+     if (input$chartType == "Scatter") {
+    color_mapping <- if (input$shotOutcome == "All Shots") {
+      scale_color_manual(values = c('red','springgreen4'), labels=c("Missed", "Made"))
+    } else if (input$shotOutcome == "Made Shots") {
+      scale_color_manual(values = 'springgreen4', labels=c("Made"))
+    } else {
+      scale_color_manual(values = 'red', labels=c("Missed"))
+    }
+
+    plot_base <- plot_base +
+      geom_point(data = shots_season, aes(x = loc_x, y = loc_y, color = factor(shot_made_flag))) +
+      labs(color = "Shot Outcome") +
+      color_mapping
+  # Generate Heat map
+  } else if (input$chartType == "Heat Map") {
+      plot_base <- plot_base +
+        stat_density_2d(data = shots_season, aes(x = loc_x, y = loc_y, fill = after_stat(density)), geom = "raster", contour = FALSE) +
+        labs(fill = "Shot Attempts") +
+        scale_fill_gradient(low = "blue", high = "red", breaks = c(0.000001, 0.00003), 
+                      labels = c("Low", "High"))
+    # Generate Hexagonal map
+    } else if (input$chartType == "Hexagonal") {
+      plot_base <- plot_base +
+        geom_hex(data = shots_season, aes(x = loc_x, y = loc_y), bins = 30) +
+        labs(fill = "Shot Count") +
+        scale_fill_gradient(low = "blue", high = "red")
+    }
+
+    # Add the court image on top of the geoms
+    plot_base + annotation_custom(court, -250, 250, -47.5, 422.5)
+    }, width = 1.75 * 480, height = 1.75 * 480)
+  
+  # Render a table with player statistics
+  output$statsTable <- renderTable({
+    shots_season <- filtered_shots_data()
+    req(nrow(shots_season) > 0)  # Make sure we have data to create statistics
+  
+    stats <- shots_season %>% 
+      group_by(shot_zone_basic) %>% 
+      summarise(
+        "FG Made" = sum(shot_made_flag),
+        "FG Attempted" = n(),
+        "FG %" = mean(shot_made_flag) * 100
+      ) %>% rename("Shot Zone" = shot_zone_basic) %>%
+      ungroup()
+  
+    stats
+  })
+  
+  # Render a Plotly of players by the type of shots they take over the years
+output$shotDistributionPlot <- renderPlotly({
+  player_data <- get_player_data(input$playerName)
+  if (nrow(player_data) == 0) {
+    return(NULL)
+  }
+
+  # Create a vector of seasons based on the player's active years
+  create_seasons_vector <- function(from_year, to_year) {
+    paste0(from_year:(to_year - 1), "-", substr((from_year + 1):(to_year), 3, 4))
+  }
+  player_seasons_vector <- create_seasons_vector(min(player_data$from_year), max(player_data$to_year))
+  
+  shot_data <- get_shots_data(input$playerName)
+  if (nrow(shot_data) == 0) {
+    return(NULL)
+  }
+
+  # Filter shot_data to only include the player's active seasons
+  shot_data <- shot_data %>%
+    filter(season %in% player_seasons_vector)
+  
+  # Calculate the statistics by zone and season
+  shot_zone_stats <- shot_data %>%
+    group_by(season, shot_zone_basic) %>%
+    summarise(shots_per_game = n() / n_distinct(game_id)) %>%
+    ungroup()
+  
+  # Calculate the overall season statistics
+  season_stats <- shot_data %>%
+    group_by(season) %>%
+    summarise(
+      total_shots = n(),
+      made_shots = sum(shot_made_flag),
+      games = n_distinct(game_id),
+      avg_shots_per_game = round((total_shots / games), 2),
+      avg_fg_percentage = round((made_shots / total_shots) * 100, 2),
+      avg_points_per_game = round((sum(parse_number(shot_type)) / games), 2),
+      efficiency = round(total_shots/sum(parse_number(shot_type)), 2)
+    ) %>%
+    ungroup()
+  
+  # Ensure 'season' column is a factor with the correct levels in both datasets
+  shot_zone_stats$season <- factor(shot_zone_stats$season, levels = player_seasons_vector)
+  season_stats$season <- factor(season_stats$season, levels = player_seasons_vector)
+  
+  # Merge the zone stats with the overall season stats
+  merged_stats <- left_join(shot_zone_stats, season_stats, by = "season")
+
+  # Create the hover text with the overall season statistics
+  merged_stats$hover_text <- paste(
+    "Season: ", merged_stats$season,
+    "<br>Total Shots: ", merged_stats$total_shots,
+    "<br>Games Played: ", merged_stats$games,
+    "<br>Avg Shots Per Game: ", merged_stats$avg_shots_per_game,
+    "<br>Avg FG%: ", merged_stats$avg_fg_percentage,
+    "<br>Points per game: ", merged_stats$avg_points_per_game,
+    "<br>Efficiency: ", merged_stats$efficiency
+  )
+  
+  # Plot with Plotly
+  plot_ly(data = merged_stats, x = ~season, y = ~shots_per_game, color = ~shot_zone_basic, type = 'scatter', mode = 'lines+markers',
+          text = ~hover_text, hoverinfo = 'text') %>%
+    layout(title = paste(input$playerName, "Shot Distribution by Season and Zone"),
+           yaxis = list(title = 'Average Shots per Game'),
+           xaxis = list(title = 'Season'))
+})
+
+
+  
+}
+# Run the application
+shinyApp(ui = ui, server = server)
+
+```
+
+# Code to download data From DB 
+<!-- ```{r} -->
+<!-- server <- function(input, output, session) { -->
+<!--   db <- dbConnect(RPostgreSQL::PostgreSQL(), -->
+<!--                   dbname = "nba-shots-db_development", -->
+<!--                   host = "localhost", -->
+<!--                   port = 5432, -->
+<!--                   user = Sys.getenv("DB_USER"), -->
+<!--                   password = Sys.getenv("DB_PASSWORD") -->
+<!--                  ) -->
+<!-- # Define the players of interest -->
+<!-- players <- c( -->
+<!--   'LeBron James', 'Jrue Holiday') -->
+
+<!-- # Establish connection to the PostgreSQL database -->
+<!-- # Please replace the dbname, host, port, user, and password with your database credentials -->
+<!--   db <- dbConnect(RPostgreSQL::PostgreSQL(), -->
+<!--                   dbname = "nba-shots-db_development", -->
+<!--                   host = "localhost", -->
+<!--                   port = 5432, -->
+<!--                   user = Sys.getenv("DB_USER"), -->
+<!--                   password = Sys.getenv("DB_PASSWORD")) -->
+
+<!-- # Function to query and write player data to CSV -->
+<!-- write_player_data_to_csv <- function(db, player_name, file_name) { -->
+<!--   query <- sprintf("SELECT * FROM players WHERE display_name = '%s'", player_name) -->
+<!--   player_data <- dbGetQuery(db, query) -->
+<!--   write.csv(player_data, file_name, row.names = FALSE) -->
+<!-- } -->
+
+<!-- # Function to query and write shot data to CSV -->
+<!-- write_shots_data_to_csv <- function(db, player_name, file_name) { -->
+<!--   query <- sprintf("SELECT s.* FROM shots s JOIN players p ON s.player_nba_id = p.nba_id WHERE p.display_name = '%s'", player_name) -->
+<!--   shots_data <- dbGetQuery(db, query) -->
+<!--   write.csv(shots_data, file_name, row.names = FALSE) -->
+<!-- } -->
+
+<!-- # Loop over the list of players and write data to CSVs -->
+<!-- for (player in players) { -->
+<!--   # Replace any spaces in player names with underscores for the file names -->
+<!--   player_file_safe_name <- gsub(" ", "_", player) -->
+
+<!--   # Player data -->
+<!--   player_csv_file <- paste0(player_file_safe_name, "_player.csv") -->
+<!--   write_player_data_to_csv(db, player, player_csv_file) -->
+
+<!--   # Shots data -->
+<!--   shots_csv_file <- paste0(player_file_safe_name, "_shots.csv") -->
+<!--   write_shots_data_to_csv(db, player, shots_csv_file) -->
+<!-- } -->
+
+<!-- # Close the database connection -->
+<!-- dbDisconnect(db) -->
+<!-- } -->
+<!-- # Run the application -->
+<!-- shinyApp(ui = ui, server = server) -->
+<!-- ``` -->
+
