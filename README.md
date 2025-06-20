@@ -36,9 +36,9 @@ install.packages(c(
 ```
 
 ## Running the Analysis
-	1.	Open nba_shots_final.Rmd in RStudio.
-	2.	Click the Knit button to render the report to HTML or PDF.
-	3.	Explore the interactive and visual outputs in the resulting document.
+1.	Open nba_shots_final.Rmd in RStudio.
+2.	Click the Knit button to render the report to HTML or PDF.
+3.	Explore the interactive and visual outputs in the resulting document.
 
 ## License
 
